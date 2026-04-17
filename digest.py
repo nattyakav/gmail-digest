@@ -143,11 +143,22 @@ Respond with ONLY valid JSON, no markdown fences, no extra text:
   "is_newsletter": true|false}}"""
 
 NEWSLETTER_DETAIL_SYSTEM = """\
-You are summarising a newsletter for someone who wants the full value without opening the email.
-Write a thorough, well-structured summary that covers EVERY significant point, story, update,
-or piece of information in the newsletter. Use flowing prose — not bullet points.
-Be comprehensive: the reader should feel they have fully read the newsletter after reading
-your summary. Aim for 200-400 words. Start directly with the content, no preamble."""
+You are summarising a newsletter. Format your response as clean HTML using ONLY these tags:
+
+<h3>  — one main headline capturing the newsletter's core topic
+<h4>  — section headings that break the summary into logical parts
+<p>   — paragraphs of flowing prose (never use bullet points or dashes)
+<strong> — key names, numbers, product names, or important terms
+
+Rules:
+- Start immediately with <h3> (no intro text, no preamble)
+- Use 2-4 <h4> sections to organise the content clearly
+- Each section has 1-3 <p> paragraphs of substantive prose
+- Cover EVERY significant story, update, insight, or piece of information
+- Emojis: maximum 2, only where they genuinely add meaning — not decoration
+- Total length: 200-400 words
+- Do NOT use: <ul>, <li>, <div>, <br>, <a>, inline styles, or any other tags
+- Be comprehensive: the reader should feel they have fully read the newsletter"""
 
 SUMMARISE_SYSTEM = "Summarise this email in 2–3 concise sentences."
 
@@ -431,11 +442,14 @@ def _build_card(email: dict, tier_num: int) -> str:
     )
 
     if is_nl and full_sum:
-        rt = _avg_read_minutes(full_sum)
+        # Strip any accidental markdown fences Claude might add
+        clean_sum = re.sub(r"^```[a-z]*\n?", "", full_sum.strip())
+        clean_sum = re.sub(r"\n?```$", "", clean_sum)
+        rt = _avg_read_minutes(clean_sum)
         summary_html = f"""
         <p class="summary" id="short-{msg_id}">{_esc(email["summary"])}</p>
-        <div class="full-s" id="full-{msg_id}" style="display:none">
-          <p class="summary full-text">{_esc(full_sum)}</p>
+        <div class="full-s formatted-summary" id="full-{msg_id}" style="display:none">
+          {clean_sum}
         </div>
         <button class="expand-btn" id="btn-{msg_id}" onclick="toggleSummary('{msg_id}')">
           📖 Read full summary · ~{rt} min read
@@ -679,6 +693,29 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
     .full-text {{
       border-top:1px solid #F1F5F9; padding-top:14px; margin-top:8px;
     }}
+
+    /* ── Formatted newsletter summary ── */
+    .formatted-summary {{
+      border-top:1px solid #F1F5F9;
+      padding-top:18px; margin-top:10px;
+    }}
+    .formatted-summary h3 {{
+      font-size:18px; font-weight:900; color:#1E293B;
+      letter-spacing:-.3px; line-height:1.3;
+      margin:0 0 14px;
+    }}
+    .formatted-summary h4 {{
+      font-size:15px; font-weight:700; color:#334155;
+      letter-spacing:-.1px; margin:20px 0 8px;
+      padding-bottom:4px; border-bottom:1px solid #F1F5F9;
+    }}
+    .formatted-summary p {{
+      font-size:15px; color:#475569; line-height:1.85;
+      margin:0 0 12px;
+    }}
+    .formatted-summary p:last-child {{ margin-bottom:0; }}
+    .formatted-summary strong {{ color:#1E293B; font-weight:700; }}
+    .formatted-summary em {{ color:#64748B; font-style:italic; }}
 
     /* ── Card image ── */
     .card-img {{
