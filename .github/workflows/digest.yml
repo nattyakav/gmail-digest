@@ -1,0 +1,88 @@
+name: Daily Gmail Digest
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC = 09:00 Israel time
+  workflow_dispatch:        # also lets you trigger it manually from GitHub
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+
+      # ── 1. Get the code ────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python ──────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 3. Write sensitive files from GitHub Secrets ───────────────────────
+      - name: Write token.json from secret
+        run: echo '${{ secrets.GMAIL_TOKEN_JSON }}' > token.json
+
+      - name: Create output directory
+        run: mkdir -p output
+
+      # ── 4. Sync ignored_domains.json from PythonAnywhere ──────────────────
+      #    (user may have toggled domains via the Settings page)
+      - name: Download ignored_domains from PythonAnywhere
+        run: |
+          HTTP_STATUS=$(curl -s -o ignored_domains.json -w "%{http_code}" \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/ignored_domains.json")
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "No ignored_domains.json on server yet — using empty list"
+            echo '[]' > ignored_domains.json
+          fi
+
+      # ── 5. Run the digest ──────────────────────────────────────────────────
+      - name: Run digest.py
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DIGEST_URL:         https://nattya01.pythonanywhere.com
+        run: python digest.py
+
+      # ── 6. Upload outputs to PythonAnywhere ───────────────────────────────
+      #    Flask app on PythonAnywhere serves these files
+      - name: Upload digest.html
+        if: always()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@output/digest.html" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/output/digest.html"
+
+      - name: Upload digest_meta.json
+        if: always()
+        run: |
+          [ -f output/digest_meta.json ] && curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@output/digest_meta.json" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/output/digest_meta.json" || true
+
+      - name: Upload run_log.json
+        if: always()
+        run: |
+          [ -f output/run_log.json ] && curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@output/run_log.json" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/output/run_log.json" || true
+
+      - name: Upload refreshed token.json
+        if: always()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@token.json" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/token.json"

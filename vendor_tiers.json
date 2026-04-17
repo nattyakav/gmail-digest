@@ -1,0 +1,15 @@
+{
+  "_comment": "Map sender domains or full email addresses to a tier (1, 2, or 3). Overrides Claude's classification. Use lowercase.",
+
+  "mybank.com":                     1,
+  "paypal.com":                     2,
+  "github.com":                     3,
+  "linkedin.com":                   3,
+  "twitter.com":                    3,
+  "x.com":                          3,
+  "facebook.com":                   3,
+  "instagram.com":                  3,
+  "noreply@accounts.google.com":    2,
+  "wix.com":                        2,
+  "notifications-noreply@linkedin": 3
+}

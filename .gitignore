@@ -1,0 +1,14 @@
+# Credentials — never commit these
+.env
+token.json
+credentials.json
+
+# Output — generated at runtime
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
