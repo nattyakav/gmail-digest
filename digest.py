@@ -444,6 +444,7 @@ def _esc(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#39;")
     )
 
 
@@ -1039,13 +1040,15 @@ def send_telegram(counts: dict[int, int], total: int) -> None:
         print("  ⚠  TELEGRAM credentials not found in .env — skipping.")
         return
     t1, t2, t3 = counts.get(1, 0), counts.get(2, 0), counts.get(3, 0)
+    auth_token = os.getenv("DIGEST_AUTH_TOKEN", "").strip()
+    digest_link = f"{DIGEST_URL}?t={auth_token}" if auth_token else DIGEST_URL
     text = (
         f"📬 *Gmail Digest is ready!*\n\n"
         f"📊 *{total}* email{'s' if total != 1 else ''} in the last 24 hours:\n"
         f"🔴 Needs Action:  *{t1}*\n"
         f"🟠 Worth Reading: *{t2}*\n"
         f"🟢 Low Priority:  *{t3}*\n\n"
-        f"👉 [Open Digest]({DIGEST_URL})"
+        f"👉 [Open Digest]({digest_link})"
     )
     payload = json.dumps({"chat_id": chat_id, "text": text,
                            "parse_mode": "Markdown"}).encode("utf-8")

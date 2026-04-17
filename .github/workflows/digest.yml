@@ -51,6 +51,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           DIGEST_URL:         https://nattya01.pythonanywhere.com
+          DIGEST_AUTH_TOKEN:  ${{ secrets.DIGEST_AUTH_TOKEN }}
         run: python digest.py
 
       # ── 6. Upload outputs to PythonAnywhere ───────────────────────────────

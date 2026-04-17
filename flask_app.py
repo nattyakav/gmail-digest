@@ -7,12 +7,14 @@ flask_app.py — PythonAnywhere web app (always-on).
 PythonAnywhere WSGI config must point to this file's `app` object.
 """
 
+import html
 import json
 import os
+from functools import wraps
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, make_response, request, send_file
 
 # Anchor all paths to the directory this file lives in
 BASE_DIR   = Path(__file__).parent.resolve()
@@ -41,16 +43,41 @@ def _gmail_service():
 # ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 
+AUTH_TOKEN = os.getenv("DIGEST_AUTH_TOKEN", "").strip()
 
-@app.after_request
-def _cors(response):
-    response.headers["Access-Control-Allow-Origin"]  = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    return response
+
+def require_auth(f):
+    """Gate endpoint behind DIGEST_AUTH_TOKEN.
+    Accepts token via ?t= query param, X-Auth header, or digest_auth cookie.
+    When passed via ?t=, the token is persisted as a cookie so future requests
+    (same-origin fetches from the HTML) auto-authenticate. If the env var is
+    not set (e.g. local dev), auth is skipped."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not AUTH_TOKEN:
+            return f(*args, **kwargs)
+        if request.method == "OPTIONS":
+            return f(*args, **kwargs)
+        provided = (
+            request.args.get("t")
+            or request.cookies.get("digest_auth")
+            or request.headers.get("X-Auth")
+        )
+        if provided != AUTH_TOKEN:
+            return ("Unauthorized", 401)
+        resp = make_response(f(*args, **kwargs))
+        if request.args.get("t") == AUTH_TOKEN:
+            resp.set_cookie(
+                "digest_auth", AUTH_TOKEN,
+                max_age=60 * 60 * 24 * 365,
+                httponly=True, secure=True, samesite="Lax",
+            )
+        return resp
+    return wrapper
 
 
 @app.route("/", methods=["GET"])
+@require_auth
 def index():
     digest = OUTPUT_DIR / "digest.html"
     if not digest.exists():
@@ -63,6 +90,7 @@ def index():
 
 
 @app.route("/archive", methods=["POST", "OPTIONS"])
+@require_auth
 def archive():
     if request_is_preflight():
         return jsonify({}), 204
@@ -133,21 +161,26 @@ def _build_settings_html(domains: list, ignored: set) -> str:
         brand   = d["brand"]
         count   = d["count"]
         checked = "" if domain in ignored else "checked"
+        # Escape for HTML context (attributes + text)
+        domain_h = html.escape(domain, quote=True)
+        brand_h  = html.escape(brand,  quote=True)
+        # JSON-encode for the JS string context — handles quotes, backslashes, unicode
+        domain_js = json.dumps(domain)
         favicon = (
-            f'<img src="https://www.google.com/s2/favicons?domain={domain}&sz=48" '
+            f'<img src="https://www.google.com/s2/favicons?domain={domain_h}&sz=48" '
             f'class="fav" alt="" onerror="this.style.display=\'none\'">'
         )
         rows += f"""
-        <div class="domain-row" id="row-{domain}">
+        <div class="domain-row" id="row-{domain_h}">
           {favicon}
           <div class="domain-info">
-            <span class="brand">{brand}</span>
-            <span class="addr">{domain}</span>
+            <span class="brand">{brand_h}</span>
+            <span class="addr">{domain_h}</span>
           </div>
           <span class="pill">{count} email{"s" if count != 1 else ""}</span>
           <label class="toggle">
             <input type="checkbox" {checked}
-                   onchange="toggleDomain('{domain}', this.checked)">
+                   onchange="toggleDomain({domain_js}, this.checked)">
             <span class="slider"></span>
           </label>
         </div>"""
@@ -308,6 +341,7 @@ def _build_settings_html(domains: list, ignored: set) -> str:
 
 
 @app.route("/status", methods=["GET"])
+@require_auth
 def run_status():
     log_path = OUTPUT_DIR / "run_log.json"
     if not log_path.exists():
@@ -316,6 +350,7 @@ def run_status():
 
 
 @app.route("/settings", methods=["GET"])
+@require_auth
 def settings():
     meta_path = OUTPUT_DIR / "digest_meta.json"
     domains   = []
@@ -334,6 +369,7 @@ def settings():
 
 
 @app.route("/settings/toggle", methods=["POST", "OPTIONS"])
+@require_auth
 def toggle_domain():
     if request_is_preflight():
         return jsonify({}), 204
