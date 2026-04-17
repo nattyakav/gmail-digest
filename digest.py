@@ -143,22 +143,26 @@ Respond with ONLY valid JSON, no markdown fences, no extra text:
   "is_newsletter": true|false}}"""
 
 NEWSLETTER_DETAIL_SYSTEM = """\
-You are summarising a newsletter. Format your response as clean HTML using ONLY these tags:
+You are summarising a newsletter. Use Markdown formatting exactly as shown:
 
-<h3>  — one main headline capturing the newsletter's core topic
-<h4>  — section headings that break the summary into logical parts
-<p>   — paragraphs of flowing prose (never use bullet points or dashes)
-<strong> — key names, numbers, product names, or important terms
+# Main headline — what this newsletter is about
+
+## Section heading
+Write a paragraph of flowing prose here. Complete sentences only, no bullet points or dashes.
+Continue in the same paragraph if needed.
+
+## Another section heading
+Next paragraph of prose here.
 
 Rules:
-- Start immediately with <h3> (no intro text, no preamble)
-- Use 2-4 <h4> sections to organise the content clearly
-- Each section has 1-3 <p> paragraphs of substantive prose
+- Exactly ONE # headline at the top
+- 2 to 4 ## section headings to organise the content
+- Each section: 1-3 paragraphs of prose beneath the heading
+- Bold key names, numbers, or terms with **bold text**
 - Cover EVERY significant story, update, insight, or piece of information
-- Emojis: maximum 2, only where they genuinely add meaning — not decoration
+- Emojis: maximum 2 total, only where genuinely meaningful — not decoration
 - Total length: 200-400 words
-- Do NOT use: <ul>, <li>, <div>, <br>, <a>, inline styles, or any other tags
-- Be comprehensive: the reader should feel they have fully read the newsletter"""
+- Start directly with the # headline — no preamble, no intro sentence"""
 
 SUMMARISE_SYSTEM = "Summarise this email in 2–3 concise sentences."
 
@@ -415,6 +419,37 @@ def _avg_read_minutes(text: str) -> int:
     return max(1, round(words / 200))
 
 
+def _md_to_html(text: str) -> str:
+    """Convert minimal markdown (# headings, **bold**, paragraphs) to safe HTML."""
+    blocks = re.split(r'\n{2,}', text.strip())
+    parts  = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        # Determine tag from leading # markers
+        if block.startswith('#### '):
+            tag, content = 'h4', block[5:]
+        elif block.startswith('### '):
+            tag, content = 'h4', block[4:]
+        elif block.startswith('## '):
+            tag, content = 'h4', block[3:]
+        elif block.startswith('# '):
+            tag, content = 'h3', block[2:]
+        else:
+            tag, content = 'p', block.replace('\n', ' ')
+        content = content.strip()
+        # Escape HTML, then restore bold/italic markers
+        content = (content
+                   .replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;'))
+        content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', content)
+        content = re.sub(r'\*(.+?)\*',     r'<em>\1</em>',          content)
+        parts.append(f'<{tag}>{content}</{tag}>')
+    return '\n'.join(parts)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Card builder
 # ─────────────────────────────────────────────────────────────────────────────
@@ -445,11 +480,12 @@ def _build_card(email: dict, tier_num: int) -> str:
         # Strip any accidental markdown fences Claude might add
         clean_sum = re.sub(r"^```[a-z]*\n?", "", full_sum.strip())
         clean_sum = re.sub(r"\n?```$", "", clean_sum)
-        rt = _avg_read_minutes(clean_sum)
+        rt        = _avg_read_minutes(clean_sum)
+        html_sum  = _md_to_html(clean_sum)
         summary_html = f"""
         <p class="summary" id="short-{msg_id}">{_esc(email["summary"])}</p>
         <div class="full-s formatted-summary" id="full-{msg_id}" style="display:none">
-          {clean_sum}
+          {html_sum}
         </div>
         <button class="expand-btn" id="btn-{msg_id}" onclick="toggleSummary('{msg_id}')">
           📖 Read full summary · ~{rt} min read
