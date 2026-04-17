@@ -357,7 +357,8 @@ def classify_email(
 
 def newsletter_full_summary(email: dict, client: anthropic.Anthropic) -> str:
     """Generate a long, comprehensive summary for newsletter emails.
-    Uses assistant-prefill to force Claude to begin with a markdown heading."""
+    Uses assistant-prefill to force Claude to begin with a markdown heading.
+    Note: prefill MUST NOT end with whitespace (Anthropic API 400 error)."""
     user_prompt = (
         f"Summarise this newsletter following the exact markdown structure "
         f"required by the system prompt.\n\n"
@@ -365,7 +366,7 @@ def newsletter_full_summary(email: dict, client: anthropic.Anthropic) -> str:
         f"Subject: {email['subject']}\n\n"
         f"{email['body'][:3000]}"
     )
-    prefill = "# "
+    prefill = "#"   # single char, no trailing space (API rejects trailing whitespace)
     response = client.messages.create(
         model=MODEL,
         max_tokens=900,
@@ -375,8 +376,8 @@ def newsletter_full_summary(email: dict, client: anthropic.Anthropic) -> str:
             {"role": "assistant", "content": prefill},
         ],
     )
-    # Prefill is NOT echoed in the response — prepend it manually
-    return prefill + response.content[0].text.strip()
+    # Prepend our prefill — Claude's continuation naturally adds " Headline..."
+    return (prefill + response.content[0].text).strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
