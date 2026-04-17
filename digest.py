@@ -143,26 +143,28 @@ Respond with ONLY valid JSON, no markdown fences, no extra text:
   "is_newsletter": true|false}}"""
 
 NEWSLETTER_DETAIL_SYSTEM = """\
-You are summarising a newsletter. Use Markdown formatting exactly as shown:
+Your output must follow this EXACT structure — no exceptions:
 
-# Main headline — what this newsletter is about
+# Headline summarising the newsletter topic
 
-## Section heading
-Write a paragraph of flowing prose here. Complete sentences only, no bullet points or dashes.
-Continue in the same paragraph if needed.
+## First section title
+One or two paragraphs of prose about this section.
 
-## Another section heading
-Next paragraph of prose here.
+## Second section title
+One or two paragraphs of prose about this section.
 
-Rules:
-- Exactly ONE # headline at the top
-- 2 to 4 ## section headings to organise the content
-- Each section: 1-3 paragraphs of prose beneath the heading
-- Bold key names, numbers, or terms with **bold text**
-- Cover EVERY significant story, update, insight, or piece of information
-- Emojis: maximum 2 total, only where genuinely meaningful — not decoration
-- Total length: 200-400 words
-- Start directly with the # headline — no preamble, no intro sentence"""
+## Third section title
+One or two paragraphs of prose about this section.
+
+STRICT RULES:
+1. First line MUST be "# " followed by a headline.
+2. Each section MUST start with "## " followed by a title. Use 2-4 sections.
+3. Section body is flowing prose in complete sentences. NO bullet points, NO dashes, NO numbered lists.
+4. Use **word** to bold key names, companies, or numbers.
+5. Maximum 2 emojis in the entire response.
+6. 200-400 words total.
+7. Cover every significant story or update in the newsletter.
+8. Output ONLY the markdown. No intro phrase, no "Here is the summary", no closing line."""
 
 SUMMARISE_SYSTEM = "Summarise this email in 2–3 concise sentences."
 
@@ -420,33 +422,42 @@ def _avg_read_minutes(text: str) -> int:
 
 
 def _md_to_html(text: str) -> str:
-    """Convert minimal markdown (# headings, **bold**, paragraphs) to safe HTML."""
-    blocks = re.split(r'\n{2,}', text.strip())
-    parts  = []
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-        # Determine tag from leading # markers
-        if block.startswith('#### '):
-            tag, content = 'h4', block[5:]
-        elif block.startswith('### '):
-            tag, content = 'h4', block[4:]
-        elif block.startswith('## '):
-            tag, content = 'h4', block[3:]
-        elif block.startswith('# '):
-            tag, content = 'h3', block[2:]
+    """Convert markdown (# headings, **bold**, paragraphs) to safe HTML.
+    Handles both single and double newline paragraph breaks."""
+
+    def _inline(s: str) -> str:
+        s = s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = re.sub(r'\*(.+?)\*',     r'<em>\1</em>',          s)
+        return s
+
+    parts      = []
+    para_lines: list[str] = []
+
+    def flush():
+        if para_lines:
+            content = ' '.join(l for l in para_lines if l)
+            if content:
+                parts.append(f'<p>{_inline(content)}</p>')
+            para_lines.clear()
+
+    for raw_line in text.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush()
+        elif line.startswith('#### ') or line.startswith('### '):
+            flush()
+            parts.append(f'<h4>{_inline(line.lstrip("#").strip())}</h4>')
+        elif line.startswith('## '):
+            flush()
+            parts.append(f'<h4>{_inline(line[3:].strip())}</h4>')
+        elif line.startswith('# '):
+            flush()
+            parts.append(f'<h3>{_inline(line[2:].strip())}</h3>')
         else:
-            tag, content = 'p', block.replace('\n', ' ')
-        content = content.strip()
-        # Escape HTML, then restore bold/italic markers
-        content = (content
-                   .replace('&', '&amp;')
-                   .replace('<', '&lt;')
-                   .replace('>', '&gt;'))
-        content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', content)
-        content = re.sub(r'\*(.+?)\*',     r'<em>\1</em>',          content)
-        parts.append(f'<{tag}>{content}</{tag}>')
+            para_lines.append(line)
+
+    flush()
     return '\n'.join(parts)
 
 
