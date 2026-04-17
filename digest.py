@@ -143,28 +143,26 @@ Respond with ONLY valid JSON, no markdown fences, no extra text:
   "is_newsletter": true|false}}"""
 
 NEWSLETTER_DETAIL_SYSTEM = """\
-Your output must follow this EXACT structure — no exceptions:
+You are summarising a newsletter. Respond with ONLY valid JSON, no markdown fences, no extra text.
 
-# Headline summarising the newsletter topic
+Schema:
+{
+  "headline": "<one-line headline capturing the newsletter's main topic>",
+  "sections": [
+    {
+      "title": "<short section title, 2-5 words>",
+      "body":  "<1-2 paragraphs of flowing prose about this section, covering every important point>"
+    }
+  ]
+}
 
-## First section title
-One or two paragraphs of prose about this section.
-
-## Second section title
-One or two paragraphs of prose about this section.
-
-## Third section title
-One or two paragraphs of prose about this section.
-
-STRICT RULES:
-1. First line MUST be "# " followed by a headline.
-2. Each section MUST start with "## " followed by a title. Use 2-4 sections.
-3. Section body is flowing prose in complete sentences. NO bullet points, NO dashes, NO numbered lists.
-4. Use **word** to bold key names, companies, or numbers.
-5. Maximum 2 emojis in the entire response.
-6. 200-400 words total.
-7. Cover every significant story or update in the newsletter.
-8. Output ONLY the markdown. No intro phrase, no "Here is the summary", no closing line."""
+Rules:
+- Produce 2 to 4 sections that break the newsletter into logical topics.
+- Each "body" is flowing prose in complete sentences. NO bullets, NO dashes, NO lists.
+- Wrap key names, companies, or numbers with **double asterisks** for bold emphasis.
+- Total prose across all sections: 200-400 words.
+- Maximum 2 emojis across the entire response.
+- Cover EVERY significant story or update in the newsletter."""
 
 SUMMARISE_SYSTEM = "Summarise this email in 2–3 concise sentences."
 
@@ -356,28 +354,47 @@ def classify_email(
 
 
 def newsletter_full_summary(email: dict, client: anthropic.Anthropic) -> str:
-    """Generate a long, comprehensive summary for newsletter emails.
-    Uses assistant-prefill to force Claude to begin with a markdown heading.
-    Note: prefill MUST NOT end with whitespace (Anthropic API 400 error)."""
+    """Return structured HTML summary for a newsletter.
+    Calls Claude for JSON, parses it, builds <h3>/<h4>/<p> directly.
+    Falls back to a single <p> block on any failure."""
     user_prompt = (
-        f"Summarise this newsletter following the exact markdown structure "
-        f"required by the system prompt.\n\n"
         f"Newsletter from: {email['sender_raw']}\n"
         f"Subject: {email['subject']}\n\n"
         f"{email['body'][:3000]}"
     )
-    prefill = "#"   # single char, no trailing space (API rejects trailing whitespace)
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=900,
-        system=NEWSLETTER_DETAIL_SYSTEM,
-        messages=[
-            {"role": "user",      "content": user_prompt},
-            {"role": "assistant", "content": prefill},
-        ],
-    )
-    # Prepend our prefill — Claude's continuation naturally adds " Headline..."
-    return (prefill + response.content[0].text).strip()
+    try:
+        raw    = _call_claude(client, NEWSLETTER_DETAIL_SYSTEM, user_prompt, max_tokens=900)
+        data   = _parse_json(raw)
+        if not data:
+            return f"<p>{_esc(raw)}</p>"
+
+        def fmt_inline(s: str) -> str:
+            s = _esc(s)
+            s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+            s = re.sub(r"\*(.+?)\*",     r"<em>\1</em>",          s)
+            return s
+
+        parts = []
+        headline = data.get("headline", "").strip()
+        if headline:
+            parts.append(f"<h3>{fmt_inline(headline)}</h3>")
+
+        for section in data.get("sections", []):
+            title = (section.get("title") or "").strip()
+            body  = (section.get("body")  or "").strip()
+            if title:
+                parts.append(f"<h4>{fmt_inline(title)}</h4>")
+            # Split body into paragraphs on blank lines
+            for para in re.split(r"\n{2,}", body):
+                para = para.strip().replace("\n", " ")
+                if para:
+                    parts.append(f"<p>{fmt_inline(para)}</p>")
+
+        return "\n".join(parts) if parts else f"<p>{_esc(raw)}</p>"
+
+    except Exception as exc:
+        print(f"    ⚠  Newsletter summary failed: {exc}")
+        return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -503,15 +520,12 @@ def _build_card(email: dict, tier_num: int) -> str:
     )
 
     if is_nl and full_sum:
-        # Strip any accidental markdown fences Claude might add
-        clean_sum = re.sub(r"^```[a-z]*\n?", "", full_sum.strip())
-        clean_sum = re.sub(r"\n?```$", "", clean_sum)
-        rt        = _avg_read_minutes(clean_sum)
-        html_sum  = _md_to_html(clean_sum)
+        # full_sum is already structured HTML from newsletter_full_summary()
+        rt = _avg_read_minutes(re.sub(r"<[^>]+>", " ", full_sum))
         summary_html = f"""
         <p class="summary" id="short-{msg_id}">{_esc(email["summary"])}</p>
         <div class="full-s formatted-summary" id="full-{msg_id}" style="display:none">
-          {html_sum}
+          {full_sum}
         </div>
         <button class="expand-btn" id="btn-{msg_id}" onclick="toggleSummary('{msg_id}')">
           📖 Read full summary · ~{rt} min read
