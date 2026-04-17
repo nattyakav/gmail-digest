@@ -356,13 +356,27 @@ def classify_email(
 
 
 def newsletter_full_summary(email: dict, client: anthropic.Anthropic) -> str:
-    """Generate a long, comprehensive summary for newsletter emails."""
+    """Generate a long, comprehensive summary for newsletter emails.
+    Uses assistant-prefill to force Claude to begin with a markdown heading."""
     user_prompt = (
+        f"Summarise this newsletter following the exact markdown structure "
+        f"required by the system prompt.\n\n"
         f"Newsletter from: {email['sender_raw']}\n"
         f"Subject: {email['subject']}\n\n"
         f"{email['body'][:3000]}"
     )
-    return _call_claude(client, NEWSLETTER_DETAIL_SYSTEM, user_prompt, max_tokens=700)
+    prefill = "# "
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=900,
+        system=NEWSLETTER_DETAIL_SYSTEM,
+        messages=[
+            {"role": "user",      "content": user_prompt},
+            {"role": "assistant", "content": prefill},
+        ],
+    )
+    # Prefill is NOT echoed in the response — prepend it manually
+    return prefill + response.content[0].text.strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
