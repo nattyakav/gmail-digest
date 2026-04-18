@@ -296,8 +296,10 @@ def get_email_details(service, msg_id: str) -> dict:
         "date":         headers.get("Date", ""),
         "body":         _mime_text(msg["payload"])[:3000],
         "image":        _first_image(service, msg_id, msg["payload"]),
+        # Gmail has no URL scheme for a threaded reply — "reply" and "open"
+        # both land on the thread, where the user clicks Reply or presses R.
         "gmail_link":   f"https://mail.google.com/mail/u/0/#inbox/{msg_id}",
-        "reply_link":   f"https://mail.google.com/mail/u/0/?view=cm&fs=1&to={address}",
+        "reply_link":   f"https://mail.google.com/mail/u/0/#inbox/{msg_id}",
         "unsubscribe":  _parse_list_unsubscribe(headers.get("List-Unsubscribe", "")),
     }
 
