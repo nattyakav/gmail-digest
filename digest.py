@@ -263,6 +263,21 @@ def _first_image(service, msg_id: str, payload: dict) -> str | None:
     return search(payload)
 
 
+def _parse_list_unsubscribe(header: str) -> str:
+    """Return first usable unsubscribe URL/mailto from a List-Unsubscribe header.
+    Format is typically: <https://...>, <mailto:unsub@...>"""
+    if not header:
+        return ""
+    # Extract values inside angle brackets
+    candidates = re.findall(r"<([^>]+)>", header)
+    # Prefer HTTPS, then HTTP, then mailto
+    for pref in ("https://", "http://", "mailto:"):
+        for c in candidates:
+            if c.lower().startswith(pref):
+                return c.strip()
+    return candidates[0].strip() if candidates else ""
+
+
 def get_email_details(service, msg_id: str) -> dict:
     msg     = service.users().messages().get(
         userId="me", id=msg_id, format="full"
@@ -283,7 +298,31 @@ def get_email_details(service, msg_id: str) -> dict:
         "image":        _first_image(service, msg_id, msg["payload"]),
         "gmail_link":   f"https://mail.google.com/mail/u/0/#inbox/{msg_id}",
         "reply_link":   f"https://mail.google.com/mail/u/0/?view=cm&fs=1&to={address}",
+        "unsubscribe":  _parse_list_unsubscribe(headers.get("List-Unsubscribe", "")),
     }
+
+
+# Per-run cache to avoid duplicate Gmail queries for the same sender
+_UNREAD_CACHE: dict[str, bool] = {}
+
+
+def sender_all_unread_30d(service, sender_email: str) -> bool:
+    """True if every message from sender in the last 30 days is unread.
+    Uses a negative 'read' search — if zero results, none were read."""
+    if not sender_email:
+        return False
+    if sender_email in _UNREAD_CACHE:
+        return _UNREAD_CACHE[sender_email]
+    try:
+        q = f'from:{sender_email} newer_than:30d -is:unread'
+        resp = service.users().messages().list(
+            userId="me", q=q, maxResults=1
+        ).execute()
+        all_unread = not resp.get("messages")
+    except HttpError:
+        all_unread = False
+    _UNREAD_CACHE[sender_email] = all_unread
+    return all_unread
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -534,6 +573,16 @@ def _build_card(email: dict, tier_num: int) -> str:
     else:
         summary_html = f'<p class="summary">{_esc(email["summary"])}</p>'
 
+    # Unsubscribe button — only for newsletters you haven't read in 30 days
+    unsub_html = ""
+    unsub_url  = email.get("unsubscribe", "")
+    if is_nl and unsub_url and email.get("unread_30d"):
+        unsub_html = (
+            f'<a href="{_esc(unsub_url)}" target="_blank" rel="noopener" '
+            f'class="unsub-link" title="You haven\'t opened any mail from this sender in 30 days">'
+            f'🚫 Unsubscribe</a>'
+        )
+
     search_str = _esc((brand + " " + email["sender_email"] + " " + subject + " " + email["summary"]).lower())
 
     return f"""
@@ -562,6 +611,7 @@ def _build_card(email: dict, tier_num: int) -> str:
       <div class="card-footer">
         <span class="cat-tag">{_esc(email["category"])}</span>
         <div class="action-links">
+          {unsub_html}
           <a href="{email["reply_link"]}" target="_blank" rel="noopener" class="reply-link">↩ Reply</a>
           <a href="{email["gmail_link"]}" target="_blank" rel="noopener" class="open-link">Open in Gmail →</a>
         </div>
@@ -875,10 +925,79 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
     .run-status-bar.err   {{ background:rgba(220,38,38,.25);  border:1px solid rgba(220,38,38,.5); }}
     .run-status-bar.run   {{ background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.3); }}
 
+    /* ── Mode toggle button ── */
+    .mode-toggle {{
+      position:absolute; left:0; top:50%; transform:translateY(-50%);
+      background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.25);
+      color:#fff; width:38px; height:38px; border-radius:50%;
+      font-size:18px; cursor:pointer; transition:background .2s;
+      display:flex; align-items:center; justify-content:center;
+    }}
+    .mode-toggle:hover {{ background:rgba(255,255,255,.3); }}
+
+    /* ── Unsubscribe link ── */
+    .unsub-link {{
+      color:#B45309; font-size:13px; font-weight:600;
+      text-decoration:none; padding:4px 10px;
+      background:#FEF3C7; border:1px solid #FDE68A;
+      border-radius:12px; transition:background .15s;
+    }}
+    .unsub-link:hover {{ background:#FDE68A; }}
+
+    /* ── Dark mode overrides ── */
+    body.dark {{
+      background:#0B1220; color:#E2E8F0;
+    }}
+    body.dark .digest-header {{
+      background:linear-gradient(135deg,#0B1220 0%,#1E293B 60%,#334155 100%);
+    }}
+    body.dark .email-card {{
+      background:#1E293B; color:#E2E8F0;
+      box-shadow:0 1px 3px rgba(0,0,0,.4);
+    }}
+    body.dark .brand-name {{ color:#F1F5F9; }}
+    body.dark .sender-addr,
+    body.dark .received,
+    body.dark .cat-tag {{ color:#94A3B8; }}
+    body.dark .subject {{ color:#F8FAFC; }}
+    body.dark .summary {{ color:#CBD5E1; }}
+    body.dark .full-s p,
+    body.dark .full-s h3,
+    body.dark .full-s h4 {{ color:#E2E8F0; }}
+    body.dark .formatted-summary strong {{ color:#F8FAFC; }}
+    body.dark .formatted-summary em     {{ color:#94A3B8; }}
+    body.dark .expand-btn {{
+      background:#0B1220; border-color:#334155; color:#93C5FD;
+    }}
+    body.dark .expand-btn:hover {{ background:#1E293B; border-color:#60A5FA; }}
+    body.dark .cat-tag {{ background:#334155; }}
+    body.dark .reply-link,
+    body.dark .open-link {{ color:#93C5FD; }}
+    body.dark .unsub-link {{
+      color:#FCD34D; background:rgba(251,191,36,.15);
+      border-color:rgba(251,191,36,.3);
+    }}
+    body.dark .unsub-link:hover {{ background:rgba(251,191,36,.25); }}
+    body.dark .tier-header h2 {{ filter:brightness(1.3); }}
+    body.dark .count-badge {{
+      background:#1E293B; color:#CBD5E1; border:1px solid #334155;
+    }}
+    body.dark .search-box {{
+      background:rgba(255,255,255,.1); color:#fff;
+      border-color:rgba(255,255,255,.2);
+    }}
+    body.dark .no-results,
+    body.dark .empty-state h3 {{ color:#CBD5E1; }}
+    body.dark .archive-bar {{
+      background:#1E293B; border-top:1px solid #334155;
+    }}
+    body.dark .archive-status {{ color:#CBD5E1; }}
+
     /* ── Mobile ── */
     @media(max-width:700px) {{
       .digest-header {{ padding:28px 20px 24px; }}
       .settings-link {{ position:static; transform:none; margin-top:12px; display:inline-block; }}
+      .mode-toggle   {{ position:static; transform:none; margin-top:12px; }}
       .header-top {{ flex-wrap:wrap; justify-content:center; }}
       .container  {{ padding:20px 16px; }}
       .email-card {{ padding:20px 20px; }}
@@ -893,6 +1012,7 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
 
   <header class="digest-header">
     <div class="header-top">
+      <button class="mode-toggle" id="modeToggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
       <h1>📬 Gmail Digest</h1>
       <a href="{base_url}/settings" class="settings-link">⚙ Settings</a>
     </div>
@@ -935,6 +1055,21 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
   </div>
 
   <script>
+    /* ── Dark mode (persisted in localStorage) ── */
+    (function() {{
+      if (localStorage.getItem('digestDarkMode') === '1') {{
+        document.body.classList.add('dark');
+        const btn = document.getElementById('modeToggle');
+        if (btn) btn.textContent = '☀️';
+      }}
+    }})();
+    function toggleDark() {{
+      const on = document.body.classList.toggle('dark');
+      localStorage.setItem('digestDarkMode', on ? '1' : '0');
+      const btn = document.getElementById('modeToggle');
+      if (btn) btn.textContent = on ? '☀️' : '🌙';
+    }}
+
     /* ── Run status ── */
     (async function() {{
       try {{
@@ -1185,6 +1320,11 @@ def _main_inner(api_key: str, started_at: str) -> None:
             if is_nl:
                 print(f"         → Newsletter — generating full summary …")
                 email["full_summary"] = newsletter_full_summary(email, ai_client)
+                # Unsubscribe helper: check 30-day read status only if we have a link
+                if email.get("unsubscribe"):
+                    email["unread_30d"] = sender_all_unread_30d(
+                        service, email["sender_email"]
+                    )
             else:
                 email["full_summary"] = ""
 
@@ -1216,6 +1356,34 @@ def _main_inner(api_key: str, started_at: str) -> None:
         "domains":      domains_list,
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    # ── Cumulative all-time domain history ───────────────────────────────────
+    # Merge today's domains into a persistent record so the settings page
+    # shows every sender ever seen, not just today's.
+    all_domains_path = Path("all_domains.json")
+    try:
+        history = {d["domain"]: d for d in
+                   json.loads(all_domains_path.read_text(encoding="utf-8"))}
+    except (FileNotFoundError, json.JSONDecodeError):
+        history = {}
+
+    now_iso = now.isoformat()
+    for domain, count in domain_counts.items():
+        entry = history.get(domain, {})
+        history[domain] = {
+            "domain":      domain,
+            "brand":       _pretty_domain(domain),
+            "first_seen":  entry.get("first_seen", now_iso),
+            "last_seen":   now_iso,
+            "total_count": entry.get("total_count", 0) + count,
+        }
+    # Sort by last_seen desc so most-recent domains appear first
+    sorted_history = sorted(
+        history.values(), key=lambda x: x.get("last_seen", ""), reverse=True
+    )
+    all_domains_path.write_text(
+        json.dumps(sorted_history, indent=2), encoding="utf-8"
+    )
 
     counts = {k: len(v) for k, v in emails_by_tier.items()}
     total  = sum(counts.values())

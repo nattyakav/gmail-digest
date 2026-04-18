@@ -5,6 +5,11 @@ credentials.json
 
 # Output — generated at runtime
 output/
+all_domains.json
+ignored_domains.json
+
+# Local scratch
+tmp/
 
 # Python
 __pycache__/

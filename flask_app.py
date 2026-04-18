@@ -286,15 +286,41 @@ def _build_settings_html(domains: list, ignored: set) -> str:
 
     .empty {{ padding:32px; text-align:center; color:#94A3B8; font-size:15px; }}
 
+    /* ── Mode toggle button ── */
+    .mode-toggle {{
+      position:absolute; right:48px; top:36px;
+      background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.25);
+      color:#fff; width:38px; height:38px; border-radius:50%;
+      font-size:18px; cursor:pointer; transition:background .2s;
+      display:flex; align-items:center; justify-content:center;
+    }}
+    .mode-toggle:hover {{ background:rgba(255,255,255,.3); }}
+
+    /* ── Dark mode overrides ── */
+    body.dark {{ background:#0B1220; color:#E2E8F0; }}
+    body.dark .page-header {{
+      background:linear-gradient(135deg,#0B1220 0%,#1E293B 60%,#334155 100%);
+    }}
+    body.dark .domain-list {{ background:#1E293B; }}
+    body.dark .domain-row  {{ border-bottom-color:#334155; }}
+    body.dark .domain-row:hover {{ background:#273449; }}
+    body.dark .brand {{ color:#F1F5F9; }}
+    body.dark .addr  {{ color:#94A3B8; }}
+    body.dark .pill  {{ background:#334155; color:#CBD5E1; }}
+    body.dark .section-title {{ color:#94A3B8; }}
+    body.dark .empty {{ color:#64748B; }}
+
     @media(max-width:600px) {{
       .page-header {{ padding:28px 20px; }}
       .container   {{ padding:0 16px; margin:24px auto; }}
       .domain-row  {{ padding:14px 16px; gap:12px; }}
+      .mode-toggle {{ right:20px; top:28px; }}
     }}
   </style>
 </head>
 <body>
   <div class="page-header">
+    <button class="mode-toggle" id="modeToggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
     <h1>⚙️ Digest Settings</h1>
     <p>Toggle off any sender domain to exclude it from future digests.
        Changes take effect on the next run.</p>
@@ -311,6 +337,21 @@ def _build_settings_html(domains: list, ignored: set) -> str:
   <div class="status-msg" id="statusMsg"></div>
 
   <script>
+    /* ── Dark mode (persisted in localStorage) ── */
+    (function() {{
+      if (localStorage.getItem('digestDarkMode') === '1') {{
+        document.body.classList.add('dark');
+        const btn = document.getElementById('modeToggle');
+        if (btn) btn.textContent = '☀️';
+      }}
+    }})();
+    function toggleDark() {{
+      const on = document.body.classList.toggle('dark');
+      localStorage.setItem('digestDarkMode', on ? '1' : '0');
+      const btn = document.getElementById('modeToggle');
+      if (btn) btn.textContent = on ? '☀️' : '🌙';
+    }}
+
     async function toggleDomain(domain, include) {{
       try {{
         const res = await fetch('/settings/toggle', {{
@@ -352,14 +393,28 @@ def run_status():
 @app.route("/settings", methods=["GET"])
 @require_auth
 def settings():
-    meta_path = OUTPUT_DIR / "digest_meta.json"
-    domains   = []
-    if meta_path.exists():
-        meta    = json.loads(meta_path.read_text(encoding="utf-8"))
-        domains = meta.get("domains", [])
+    # Prefer cumulative all-domain history; fall back to latest run if missing.
+    history_path = BASE_DIR / "all_domains.json"
+    domains: list = []
+    if history_path.exists():
+        try:
+            history = json.loads(history_path.read_text(encoding="utf-8"))
+            domains = [
+                {"domain": d["domain"], "brand": d["brand"],
+                 "count":  d.get("total_count", 0)}
+                for d in history
+            ]
+        except json.JSONDecodeError:
+            domains = []
+
+    if not domains:
+        meta_path = OUTPUT_DIR / "digest_meta.json"
+        if meta_path.exists():
+            meta    = json.loads(meta_path.read_text(encoding="utf-8"))
+            domains = meta.get("domains", [])
 
     ignored = _load_ignored()
-    # Also show any ignored domains that didn't appear in the latest digest
+    # Also show any ignored domains not present in history
     extra = [
         {"domain": d, "brand": d, "count": 0}
         for d in sorted(ignored)

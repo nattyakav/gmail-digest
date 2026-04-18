@@ -32,8 +32,9 @@ jobs:
       - name: Create output directory
         run: mkdir -p output
 
-      # ── 4. Sync ignored_domains.json from PythonAnywhere ──────────────────
-      #    (user may have toggled domains via the Settings page)
+      # ── 4. Sync persistent state from PythonAnywhere ──────────────────────
+      #    (user may have toggled domains via the Settings page; the domain
+      #    history must accumulate across runs)
       - name: Download ignored_domains from PythonAnywhere
         run: |
           HTTP_STATUS=$(curl -s -o ignored_domains.json -w "%{http_code}" \
@@ -42,6 +43,16 @@ jobs:
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "No ignored_domains.json on server yet — using empty list"
             echo '[]' > ignored_domains.json
+          fi
+
+      - name: Download all_domains history from PythonAnywhere
+        run: |
+          HTTP_STATUS=$(curl -s -o all_domains.json -w "%{http_code}" \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/all_domains.json")
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "No all_domains.json on server yet — starting fresh"
+            echo '[]' > all_domains.json
           fi
 
       # ── 5. Run the digest ──────────────────────────────────────────────────
@@ -87,3 +98,26 @@ jobs:
             -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
             -F "content=@token.json" \
             "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/token.json"
+
+      - name: Upload all_domains history
+        if: always()
+        run: |
+          [ -f all_domains.json ] && curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@all_domains.json" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/all_domains.json" || true
+
+      - name: Upload flask_app.py (code refresh)
+        if: always()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            -F "content=@flask_app.py" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/flask_app.py"
+
+      - name: Reload PythonAnywhere webapp
+        if: always()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/webapps/nattya01.pythonanywhere.com/reload/" || true
