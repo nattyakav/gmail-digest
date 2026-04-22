@@ -1147,10 +1147,32 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
         const res  = await fetch('{base_url}/archive', {{ method:'POST' }});
         const data = await res.json();
         if (data.success) {{
-          btn.textContent    = '✓ Done';
           const n = data.archived;
-          status.textContent = n + ' email' + (n !== 1 ? 's' : '') + ' archived.';
-          status.className   = 'archive-status success';
+
+          // Fade out every email card
+          document.querySelectorAll('.email-card').forEach(card => {{
+            card.style.transition = 'opacity 0.35s, transform 0.35s';
+            card.style.opacity    = '0';
+            card.style.transform  = 'translateY(-6px)';
+          }});
+
+          // After the fade, clear the DOM and show a done state
+          setTimeout(() => {{
+            document.querySelectorAll('.tier-section').forEach(s => s.remove());
+            document.getElementById('noResults').style.display = 'none';
+
+            const main = document.querySelector('.container');
+            main.innerHTML = `
+              <div class="empty-state" style="margin-top:60px">
+                <div class="empty-icon">✅</div>
+                <h3>All done!</h3>
+                <p>${{n}} email${{n !== 1 ? 's' : ''}} archived — inbox cleared.</p>
+              </div>`;
+
+            // Hide the archive bar too
+            document.querySelector('.archive-bar').style.display = 'none';
+          }}, 400);
+
         }} else {{ throw new Error(data.error || 'Unknown error'); }}
       }} catch (e) {{
         btn.textContent    = '🗂 Archive All Emails';

@@ -154,13 +154,26 @@ def _save_ignored(ignored: set) -> None:
     p.write_text(json.dumps(sorted(ignored), indent=2), encoding="utf-8")
 
 
+def _fmt_last_seen(iso: str) -> str:
+    """Turn an ISO date string into a short human label like 'Apr 18'."""
+    if not iso:
+        return ""
+    try:
+        from datetime import datetime as _dt
+        d = _dt.fromisoformat(iso[:10])
+        return d.strftime("%-d %b")
+    except Exception:
+        return ""
+
+
 def _build_settings_html(domains: list, ignored: set) -> str:
     rows = ""
     for d in domains:
-        domain  = d["domain"]
-        brand   = d["brand"]
-        count   = d["count"]
-        checked = "" if domain in ignored else "checked"
+        domain    = d["domain"]
+        brand     = d["brand"]
+        count     = d["count"]
+        last_seen = _fmt_last_seen(d.get("last_seen", ""))
+        checked   = "" if domain in ignored else "checked"
         # Escape for HTML context (attributes + text)
         domain_h = html.escape(domain, quote=True)
         brand_h  = html.escape(brand,  quote=True)
@@ -177,7 +190,7 @@ def _build_settings_html(domains: list, ignored: set) -> str:
             <span class="brand">{brand_h}</span>
             <span class="addr">{domain_h}</span>
           </div>
-          <span class="pill">{count} email{"s" if count != 1 else ""}</span>
+          <span class="pill">{count} email{"s" if count != 1 else ""}{f" · {last_seen}" if last_seen else ""}</span>
           <label class="toggle">
             <input type="checkbox" {checked}
                    onchange="toggleDomain({domain_js}, this.checked)">
@@ -322,13 +335,14 @@ def _build_settings_html(domains: list, ignored: set) -> str:
   <div class="page-header">
     <button class="mode-toggle" id="modeToggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
     <h1>⚙️ Digest Settings</h1>
-    <p>Toggle off any sender domain to exclude it from future digests.
+    <p>This is your master list of every sender ever seen.
+       <strong>ON</strong> = included in the digest. <strong>OFF</strong> = ignored forever.
        Changes take effect on the next run.</p>
     <a href="/" class="back-link">← Back to Digest</a>
   </div>
 
   <div class="container">
-    <div class="section-title">Sender Domains</div>
+    <div class="section-title">All sender domains — {len(domains)} total</div>
     <div class="domain-list">
       {rows}
     </div>
@@ -400,8 +414,10 @@ def settings():
         try:
             history = json.loads(history_path.read_text(encoding="utf-8"))
             domains = [
-                {"domain": d["domain"], "brand": d["brand"],
-                 "count":  d.get("total_count", 0)}
+                {"domain":    d["domain"],
+                 "brand":     d["brand"],
+                 "count":     d.get("total_count", 0),
+                 "last_seen": d.get("last_seen", "")}
                 for d in history
             ]
         except json.JSONDecodeError:
