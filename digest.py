@@ -191,8 +191,9 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def get_emails_last_24h(service) -> list[dict]:
-    cutoff = int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp())
+def get_emails_since(service, since: datetime) -> list[dict]:
+    """Fetch all INBOX emails received after `since` (a UTC-aware datetime)."""
+    cutoff = int(since.timestamp())
     query  = f"after:{cutoff} in:inbox"
     stubs, page_token = [], None
     while True:
@@ -205,6 +206,27 @@ def get_emails_last_24h(service) -> list[dict]:
         if not page_token:
             break
     return stubs
+
+
+def _load_since_dt() -> tuple[datetime, str]:
+    """Return (cutoff datetime, human label) based on last_archived_at.json.
+    Falls back to 24 hours ago if the file is missing or unreadable."""
+    p = Path("last_archived_at.json")
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            ts   = data.get("archived_at", "")
+            if ts:
+                dt    = datetime.fromisoformat(ts)
+                # Make timezone-aware if naive
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                label = f"last archive on {dt.strftime('%a %b %-d at %H:%M')}"
+                return dt, label
+        except Exception:
+            pass
+    fallback = datetime.now(timezone.utc) - timedelta(hours=24)
+    return fallback, "last 24 hours"
 
 
 # ── MIME parsing ──────────────────────────────────────────────────────────────
@@ -1303,11 +1325,12 @@ def _main_inner(api_key: str, started_at: str) -> None:
     print("\n🔐 Authenticating with Gmail …")
     service = get_gmail_service()
 
-    print("📥 Fetching emails from the last 24 hours …")
-    stubs = get_emails_last_24h(service)
+    since_dt, since_label = _load_since_dt()
+    print(f"📥 Fetching emails since {since_label} …")
+    stubs = get_emails_since(service, since_dt)
 
     if not stubs:
-        print("📭 No emails found in the last 24 hours.")
+        print(f"📭 No emails found since {since_label}.")
         _write_run_log("success", counts={"1":0,"2":0,"3":0}, total=0,
                        started_at=started_at)
         return
@@ -1360,9 +1383,19 @@ def _main_inner(api_key: str, started_at: str) -> None:
             print(f"    ⚠  Error processing {stub['id']}: {exc}")
 
     # ── Generate HTML ────────────────────────────────────────────────────────
-    now      = datetime.now()
-    date_str = now.strftime(f"%A, %B {now.day}, %Y")
-    html     = generate_html(emails_by_tier, date_str, DIGEST_URL)
+    now         = datetime.now()
+    since_local = since_dt.astimezone().replace(tzinfo=None)
+    # Show the period covered: single day = "Tuesday, April 22, 2026",
+    # multi-day = "Apr 19 – Apr 22, 2026"
+    if since_local.date() == now.date():
+        date_str = now.strftime(f"%A, %B {now.day}, %Y")
+    else:
+        date_str = (
+            since_local.strftime(f"%b {since_local.day}")
+            + " \u2013 "
+            + now.strftime(f"%b {now.day}, %Y")
+        )
+    html = generate_html(emails_by_tier, date_str, DIGEST_URL)
 
     html_path = OUTPUT_DIR / "digest.html"
     meta_path = OUTPUT_DIR / "digest_meta.json"

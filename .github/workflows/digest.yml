@@ -55,6 +55,16 @@ jobs:
             echo '[]' > all_domains.json
           fi
 
+      - name: Download last_archived_at from PythonAnywhere
+        run: |
+          HTTP_STATUS=$(curl -s -o last_archived_at.json -w "%{http_code}" \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/last_archived_at.json")
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "No last_archived_at.json yet — will fall back to 24h window"
+            echo '{}' > last_archived_at.json
+          fi
+
       # ── 5. Run the digest ──────────────────────────────────────────────────
       - name: Run digest.py
         env:

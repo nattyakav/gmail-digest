@@ -7,6 +7,7 @@ credentials.json
 output/
 all_domains.json
 ignored_domains.json
+last_archived_at.json
 
 # Local scratch
 tmp/

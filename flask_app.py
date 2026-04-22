@@ -128,6 +128,14 @@ def archive():
         meta["email_ids"] = []
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
+        # Record when archiving happened so the next digest run fetches
+        # only emails received after this moment
+        import datetime as _dt
+        (BASE_DIR / "last_archived_at.json").write_text(
+            json.dumps({"archived_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}),
+            encoding="utf-8",
+        )
+
         result: dict = {"success": True, "archived": archived}
         if failed:
             result["warnings"] = f"{failed} email(s) could not be archived."
