@@ -64,7 +64,12 @@ def require_auth(f):
             or request.headers.get("X-Auth")
         )
         if provided != AUTH_TOKEN:
-            return ("Unauthorized", 401)
+            # Return JSON so JS callers can distinguish auth failure from network error
+            from flask import Response as _Resp
+            return _Resp(
+                '{"success":false,"error":"Unauthorized"}',
+                status=401, mimetype="application/json",
+            )
         resp = make_response(f(*args, **kwargs))
         if request.args.get("t") == AUTH_TOKEN:
             resp.set_cookie(
@@ -86,7 +91,10 @@ def index():
             "📭 Digest not ready yet — check back after 09:00 TLV.</h2>",
             404,
         )
-    return send_file(str(digest))
+    resp = make_response(send_file(str(digest)))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @app.route("/archive", methods=["POST", "OPTIONS"])
@@ -378,12 +386,17 @@ def _build_settings_html(domains: list, ignored: set) -> str:
       try {{
         const res = await fetch('/settings/toggle', {{
           method: 'POST',
+          credentials: 'same-origin',
           headers: {{'Content-Type': 'application/json'}},
           body: JSON.stringify({{ domain, ignore: !include }})
         }});
         const data = await res.json();
+        if (res.status === 401) {{
+          flash('⚠️ Session expired — please reload the page');
+          return;
+        }}
         if (data.success) {{
-          flash(include ? domain + ' will be included' : domain + ' will be ignored');
+          flash(include ? '✓ ' + domain + ' included' : '🚫 ' + domain + ' ignored');
         }} else {{
           flash('Error: ' + (data.error || 'unknown'));
         }}
@@ -444,7 +457,11 @@ def settings():
         for d in sorted(ignored)
         if not any(x["domain"] == d for x in domains)
     ]
-    return _build_settings_html(domains + extra, ignored)
+    html_content = _build_settings_html(domains + extra, ignored)
+    resp = make_response(html_content)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @app.route("/settings/toggle", methods=["POST", "OPTIONS"])
