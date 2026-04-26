@@ -42,7 +42,7 @@ import anthropic
 SCOPES     = ["https://www.googleapis.com/auth/gmail.modify"]
 OUTPUT_DIR = Path("output")
 PORT       = 8080
-MODEL      = "claude-sonnet-4-5"
+MODEL      = "claude-sonnet-4-6"
 DIGEST_URL = os.getenv("DIGEST_URL", f"http://localhost:{PORT}").rstrip("/")
 
 TIER_CONFIG: dict[int, dict] = {
