@@ -28,9 +28,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ── 3. Write sensitive files from GitHub Secrets ───────────────────────
-      - name: Write token.json from secret
-        run: echo '${{ secrets.GMAIL_TOKEN_JSON }}' > token.json
+      # ── 3. Get token.json — prefer the live copy on PythonAnywhere (always
+      #    up-to-date after each run's refresh), fall back to the GitHub
+      #    secret only on first-ever run or if PA copy is missing.
+      - name: Get token.json from PythonAnywhere (or secret fallback)
+        run: |
+          HTTP_STATUS=$(curl -s -o token.json -w "%{http_code}" \
+            -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/token.json")
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "No token on PythonAnywhere yet — using GitHub secret as bootstrap"
+            echo '${{ secrets.GMAIL_TOKEN_JSON }}' > token.json
+          else
+            echo "Using live token from PythonAnywhere (status $HTTP_STATUS)"
+          fi
 
       - name: Create output directory
         run: mkdir -p output
