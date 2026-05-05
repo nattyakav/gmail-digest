@@ -5,6 +5,9 @@ on:
     - cron: '0 6 * * *'   # 06:00 UTC = 09:00 Israel time
   workflow_dispatch:        # also lets you trigger it manually from GitHub
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   digest:
     runs-on: ubuntu-latest
@@ -80,10 +83,10 @@ jobs:
       - name: Upload digest.html
         if: always()
         run: |
-          curl -s -X POST \
+          [ -f output/digest.html ] && curl -s -X POST \
             -H "Authorization: Token ${{ secrets.PA_API_TOKEN }}" \
             -F "content=@output/digest.html" \
-            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/output/digest.html"
+            "https://www.pythonanywhere.com/api/v0/user/nattya01/files/path/home/nattya01/gmail_digest/output/digest.html" || true
 
       - name: Upload digest_meta.json
         if: always()
