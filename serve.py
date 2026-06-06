@@ -133,8 +133,15 @@ class DigestHandler(BaseHTTPRequestHandler):
                 },
             )
 
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        ids  = meta.get("email_ids", [])
+        meta    = json.loads(meta_path.read_text(encoding="utf-8"))
+        all_ids = meta.get("email_ids", [])
+
+        # Honour any IDs the client flagged as "keep in inbox"
+        length      = int(self.headers.get("Content-Length", 0))
+        raw_body    = self.rfile.read(length) if length else b""
+        body        = json.loads(raw_body) if raw_body else {}
+        exclude_ids = set(body.get("exclude_ids", []))
+        ids         = [i for i in all_ids if i not in exclude_ids]
 
         if not ids:
             return self._json(
@@ -158,8 +165,8 @@ class DigestHandler(BaseHTTPRequestHandler):
                     print(f"  ⚠  Could not archive {msg_id}: {exc}")
                     failed += 1
 
-            # Clear IDs to prevent accidental double-archive
-            meta["email_ids"] = []
+            # Keep only excluded IDs so they can still be archived later
+            meta["email_ids"] = list(exclude_ids & set(all_ids))
             meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
             result: dict = {"success": True, "archived": archived}

@@ -109,7 +109,12 @@ def archive():
                         "error": "No metadata. Run digest.py first."}), 400
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    ids  = meta.get("email_ids", [])
+    all_ids = meta.get("email_ids", [])
+
+    # Honour any IDs the client flagged as "keep in inbox"
+    body        = request.get_json(silent=True) or {}
+    exclude_ids = set(body.get("exclude_ids", []))
+    ids         = [i for i in all_ids if i not in exclude_ids]
 
     if not ids:
         return jsonify({"success": True, "archived": 0,
@@ -132,8 +137,8 @@ def archive():
                 app.logger.warning("Could not archive %s: %s", msg_id, exc)
                 failed += 1
 
-        # Prevent double-archive
-        meta["email_ids"] = []
+        # Keep only the IDs that were excluded (so they can still be archived later)
+        meta["email_ids"] = list(exclude_ids & set(all_ids))
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         # Record when archiving happened so the next digest run fetches

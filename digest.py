@@ -620,7 +620,7 @@ def _build_card(email: dict, tier_num: int) -> str:
 
     return f"""
     <article class="email-card" style="border-left:5px solid {cfg["color"]};"
-             data-search="{search_str}">
+             data-search="{search_str}" data-msgid="{msg_id}">
 
       <div class="card-header">
         <div class="brand-left">
@@ -645,6 +645,9 @@ def _build_card(email: dict, tier_num: int) -> str:
         <span class="cat-tag">{_esc(email["category"])}</span>
         <div class="action-links">
           {unsub_html}
+          <button class="keep-btn" id="keep-{msg_id}"
+                  onclick="toggleKeep('{msg_id}', this)"
+                  title="Keep in inbox — won't be archived">📌 Keep</button>
           <a href="{email["reply_link"]}" target="_blank" rel="noopener" class="reply-link">↩ Reply</a>
           <a href="{email["gmail_link"]}" target="_blank" rel="noopener" class="open-link">Open in Gmail →</a>
         </div>
@@ -968,6 +971,19 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
     }}
     .mode-toggle:hover {{ background:rgba(255,255,255,.3); }}
 
+    /* ── Keep-in-inbox toggle ── */
+    .keep-btn {{
+      background:none; border:1.5px solid #CBD5E1; color:#64748B;
+      font-size:13px; font-weight:600; padding:4px 10px;
+      border-radius:12px; cursor:pointer; font-family:'Lato',sans-serif;
+      transition:all .15s;
+    }}
+    .keep-btn:hover {{ background:#F1F5F9; border-color:#94A3B8; }}
+    .keep-btn.kept {{
+      background:#ECFDF5; border-color:#6EE7B7; color:#065F46;
+    }}
+    .keep-btn.kept:hover {{ background:#D1FAE5; }}
+
     /* ── Unsubscribe link ── */
     .unsub-link {{
       color:#B45309; font-size:13px; font-weight:600;
@@ -1006,6 +1022,14 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
     body.dark .cat-tag {{ background:#334155; }}
     body.dark .reply-link,
     body.dark .open-link {{ color:#93C5FD; }}
+    body.dark .keep-btn {{
+      border-color:#334155; color:#94A3B8;
+    }}
+    body.dark .keep-btn:hover {{ background:#1E293B; border-color:#475569; }}
+    body.dark .keep-btn.kept {{
+      background:rgba(6,95,70,.3); border-color:#6EE7B7; color:#6EE7B7;
+    }}
+    body.dark .keep-btn.kept:hover {{ background:rgba(6,95,70,.45); }}
     body.dark .unsub-link {{
       color:#FCD34D; background:rgba(251,191,36,.15);
       border-color:rgba(251,191,36,.3);
@@ -1166,6 +1190,22 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
         anyVis ? 'none' : 'block';
     }}
 
+    /* ── Keep-in-inbox toggle ── */
+    const keptIds = new Set();
+    function toggleKeep(id, btn) {{
+      if (keptIds.has(id)) {{
+        keptIds.delete(id);
+        btn.classList.remove('kept');
+        btn.textContent = '📌 Keep';
+        btn.title = "Keep in inbox — won't be archived";
+      }} else {{
+        keptIds.add(id);
+        btn.classList.add('kept');
+        btn.textContent = '✅ Keeping';
+        btn.title = 'Will stay in inbox';
+      }}
+    }}
+
     /* ── Archive all ── */
     async function archiveAll() {{
       const btn    = document.getElementById('archiveBtn');
@@ -1175,33 +1215,51 @@ def generate_html(emails_by_tier: dict[int, list], date_str: str,
       status.textContent = '';
       status.className   = 'archive-status';
       try {{
-        const res  = await fetch('{base_url}/archive', {{ method:'POST' }});
+        const res  = await fetch('{base_url}/archive', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{exclude_ids: [...keptIds]}})
+        }});
         const data = await res.json();
         if (data.success) {{
           const n = data.archived;
+          const k = keptIds.size;
 
-          // Fade out every email card
+          // Fade out non-kept cards
           document.querySelectorAll('.email-card').forEach(card => {{
-            card.style.transition = 'opacity 0.35s, transform 0.35s';
-            card.style.opacity    = '0';
-            card.style.transform  = 'translateY(-6px)';
+            if (!keptIds.has(card.dataset.msgid)) {{
+              card.style.transition = 'opacity 0.35s, transform 0.35s';
+              card.style.opacity    = '0';
+              card.style.transform  = 'translateY(-6px)';
+            }}
           }});
 
-          // After the fade, clear the DOM and show a done state
           setTimeout(() => {{
-            document.querySelectorAll('.tier-section').forEach(s => s.remove());
-            document.getElementById('noResults').style.display = 'none';
+            // Remove archived cards from DOM
+            document.querySelectorAll('.email-card').forEach(card => {{
+              if (!keptIds.has(card.dataset.msgid)) card.remove();
+            }});
+            // Remove tier sections that are now empty
+            document.querySelectorAll('.tier-section').forEach(s => {{
+              if (s.querySelectorAll('.email-card').length === 0) s.remove();
+            }});
 
-            const main = document.querySelector('.container');
-            main.innerHTML = `
-              <div class="empty-state" style="margin-top:60px">
-                <div class="empty-icon">✅</div>
-                <h3>All done!</h3>
-                <p>${{n}} email${{n !== 1 ? 's' : ''}} archived — inbox cleared.</p>
-              </div>`;
-
-            // Hide the archive bar too
-            document.querySelector('.archive-bar').style.display = 'none';
+            if (k === 0) {{
+              // Everything archived
+              document.getElementById('noResults').style.display = 'none';
+              document.querySelector('.container').innerHTML = `
+                <div class="empty-state" style="margin-top:60px">
+                  <div class="empty-icon">✅</div>
+                  <h3>All done!</h3>
+                  <p>${{n}} email${{n !== 1 ? 's' : ''}} archived — inbox cleared.</p>
+                </div>`;
+              document.querySelector('.archive-bar').style.display = 'none';
+            }} else {{
+              // Some emails kept
+              status.textContent = `✅ ${{n}} archived · 📌 ${{k}} kept in inbox`;
+              status.className   = 'archive-status success';
+              btn.style.display  = 'none';
+            }}
           }}, 400);
 
         }} else {{ throw new Error(data.error || 'Unknown error'); }}
