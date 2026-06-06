@@ -105,24 +105,29 @@ TAXONOMY = """\
 TIER DEFINITIONS
 ────────────────
 Tier 1 — Needs Action (reply / decision required):
-  • Job offers or recruiter outreach
+  • Personal intro or networking introduction requests (e.g. "Intro to X", "Insights & Intro",
+    someone connecting two people, or requesting a meeting/call specifically with you)
+  • Hotel / travel bookings requiring check-in action, confirmation, or a response
+  • Shipping updates — any order status change: shipped, out for delivery, delivered, delayed
+  • Job offers or recruiter outreach for MANAGEMENT or DATA TEAM LEADERSHIP roles
+    (e.g. Head of Data, VP Data, Data Team Lead, Director of Analytics, CDO)
   • Press screening invitations or events requiring RSVP
   • Financial alerts that need immediate action (suspicious activity, payment overdue)
   • Direct personal outreach — someone writing *specifically to you* to collaborate,
     meet, work together, or connect personally (NOT automated / newsletter / promotional)
 
 Tier 2 — Worth Reading (useful info, no reply needed):
-  • Order confirmed / shipped / delayed / delivered
   • Regular financial statements or pension reports
   • Newsletters (all of them, even interesting ones)
   • Wix site or billing notices
-  • General transactional emails
+  • General transactional emails (order confirmations, receipts)
 
 Tier 3 — Low Priority (skim or ignore):
   • GitHub notifications (hobby / personal repos)
   • Marketing, promotions, discount codes, sales campaigns
   • Pre-shipment shopping fluff ("your order is being prepared")
-  • Social notifications (LinkedIn likes / follows, Twitter/X activity)
+  • Social notifications (LinkedIn likes / follows / views, Twitter/X activity)
+  • LinkedIn job suggestions that are NOT for management or data team leadership roles
   • Automated system emails, app push notifications
 """
 
@@ -130,12 +135,16 @@ CLASSIFY_SYSTEM = f"""\
 You are a personal email classifier and summariser.
 {TAXONOMY}
 Rules (apply strictly):
+- Personal intro / networking introduction requests → Tier 1
 - Direct personal outreach written specifically to the recipient (not automated) → Tier 1
-- Job offers, recruiters → Tier 1
+- Hotel or travel booking requiring check-in or any action from the recipient → Tier 1
+- Any shipping / order status update (shipped / out for delivery / delivered / delayed) → Tier 1
+- LinkedIn job offer for a management or data leadership role → Tier 1
+- LinkedIn job offer for any other role → Tier 3
+- Other job offers, recruiters → Tier 1
 - Newsletters → always Tier 2
 - Marketing / promotions → always Tier 3
-- Shipping confirmed/shipped/delayed/delivered → Tier 2
-- "Being prepared" / pre-ship fluff → Tier 3
+- Pre-shipment fluff ("being prepared", "processing") → Tier 3
 
 Respond with ONLY valid JSON, no markdown fences, no extra text:
 {{"tier": 1|2|3, "category": "<short name, e.g. Job Offer>",
